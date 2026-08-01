@@ -69,6 +69,8 @@ jobs:
           - "25.0.1"
           - "25.0.2"
           - "25"
+          - "30.0.0"
+          - "30"
           - "null"
 
     env:
@@ -84,7 +86,7 @@ jobs:
 
       - name: Install Xiond
         run: |
-          echo "Matrix OS: ${{ matrix.os }}"          
+          echo "Matrix OS: ${{ matrix.os }}"
           echo "Matrix version: ${{ matrix.version }}"
 
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
@@ -92,6 +94,8 @@ jobs:
           fi
 
           brew tap burnt-labs/xion ${{ github.workspace }}
+          brew trust burnt-labs/xion
+
           if [[ "${{ matrix.version }}" == "null" ]]; then
             echo "Installing latest version of xiond"
             brew install xiond
