@@ -13,14 +13,24 @@
 #
 # Checksums are read from the release's checksums.txt on GitHub. Supports the
 # modern (v15+) asset naming: xiond_<version>_<os>_<arch>.tar.gz.
+#
+# Portable to macOS out of the box: plain POSIX tools only, no GNU sed or
+# bash-4 features (the stock /bin/bash is 3.2).
 set -euo pipefail
 
 TAG="${1:?usage: $0 <tag>}"
 TAG="v${TAG#v}"
+
+SEMVER_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+if ! [[ "$TAG" =~ $SEMVER_RE ]]; then
+  echo "error: '$TAG' is not a release tag (expected vMAJOR.MINOR.PATCH[-suffix])" >&2
+  exit 2
+fi
+
 VERSION="${TAG#v}"
 MAJOR="${VERSION%%.*}"
 
-if [ "$MAJOR" -le 14 ] 2>/dev/null; then
+if [ "$MAJOR" -le 14 ]; then
   echo "error: only releases v15+ use the current asset naming; older formulas are kept as committed" >&2
   exit 1
 fi
@@ -32,20 +42,29 @@ fi
 
 # Ruby class suffix: drop dots, camelize pre-release segments
 # (29.0.1 -> 2901, 29.0.0-rc1 -> 2900Rc1).
-CLASS_VERSION=$(echo "$VERSION" | tr -d '.' | sed -E 's/-([a-z])/\U\1/g')
+CLASS_VERSION=$(echo "$VERSION" | tr -d '.' | awk -F- '{
+  out = $1
+  for (i = 2; i <= NF; i++) out = out toupper(substr($i, 1, 1)) substr($i, 2)
+  print out
+}')
 
 echo "Downloading checksums for ${TAG}..."
 CHECKSUMS=$(curl -fsSL "https://github.com/burnt-labs/xion/releases/download/${TAG}/xiond-${VERSION}-checksums.txt")
 
 checksum() {
-  echo "$CHECKSUMS" | grep " xiond_${VERSION}_$1\.tar\.gz\$" | awk '{print $1}'
+  # Single awk call: a grep in this pipeline would trip pipefail on a missing
+  # entry before the per-platform "not found" checks below get to report it.
+  echo "$CHECKSUMS" | awk -v want="xiond_${VERSION}_$1.tar.gz" '$2 == want { print $1 }'
 }
 DARWIN_AMD64=$(checksum darwin_amd64)
 DARWIN_ARM64=$(checksum darwin_arm64)
 LINUX_AMD64=$(checksum linux_amd64)
 LINUX_ARM64=$(checksum linux_arm64)
 for v in DARWIN_AMD64 DARWIN_ARM64 LINUX_AMD64 LINUX_ARM64; do
-  [ -n "${!v}" ] || { echo "error: ${v,,} checksum not found for ${VERSION}" >&2; exit 1; }
+  [ -n "${!v}" ] || {
+    echo "error: $(echo "$v" | tr '[:upper:]' '[:lower:]') checksum not found for ${VERSION}" >&2
+    exit 1
+  }
 done
 
 render() {

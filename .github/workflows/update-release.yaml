@@ -37,11 +37,16 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        # Payload/input values are env-bound (not interpolated into the script text) so a
+        # crafted tag can't inject shell on the runner.
+        env:
+          DISPATCH_TAG: ${{ github.event.client_payload.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
         run: |
           if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            TAG="${{ github.event.client_payload.tag_name }}"
+            TAG="$DISPATCH_TAG"
           else
-            TAG="${{ github.event.inputs.tag_name }}"
+            TAG="$INPUT_TAG"
           fi
           VERSION="${TAG#v}"
 
@@ -57,41 +62,51 @@ jobs:
 
       - name: Create branch
         id: branch
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          BRANCH="xiond-${{ steps.version.outputs.tag }}"
+          BRANCH="xiond-${TAG}"
           git checkout -b "$BRANCH" || git checkout "$BRANCH"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
       - name: Generate formulas
-        run: ./generate.sh "${{ steps.version.outputs.tag }}"
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: ./generate.sh "$TAG"
 
       - name: Commit changes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           git add Formula/
           if git diff --staged --quiet; then
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "Brew formula update for xiond version ${{ steps.version.outputs.tag }}"
+          git commit -m "Brew formula update for xiond version ${TAG}"
 
       - name: Push changes
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
         run: |
-          git push origin "${{ steps.branch.outputs.branch }}" || git push -f origin "${{ steps.branch.outputs.branch }}"
+          git push origin "$BRANCH" || git push -f origin "$BRANCH"
 
       - name: Create Pull Request
         env:
           GH_TOKEN: ${{ secrets.BURNT_PAT_GITHUB_ACTIONS_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -e
-          BRANCH="${{ steps.branch.outputs.branch }}"
-          IS_PRERELEASE="${{ steps.version.outputs.is_prerelease }}"
 
           if [ "$IS_PRERELEASE" == "true" ]; then
-            PR_TITLE="[Pre-release] Brew formula update for xiond version ${{ steps.version.outputs.tag }}"
-            PR_BODY="Updates the Homebrew versioned formulas for xiond pre-release ${{ steps.version.outputs.tag }}. Note: This is a pre-release. The main xiond.rb formula is unchanged (users running brew install xiond will still get the latest stable release). To install this pre-release: brew install burnt-labs/xion/xiond@${{ steps.version.outputs.version }}"
+            PR_TITLE="[Pre-release] Brew formula update for xiond version ${TAG}"
+            PR_BODY="Updates the Homebrew versioned formulas for xiond pre-release ${TAG}. Note: This is a pre-release. The main xiond.rb formula is unchanged (users running brew install xiond will still get the latest stable release). To install this pre-release: brew install burnt-labs/xion/xiond@${VERSION}"
           else
-            PR_TITLE="Brew formula update for xiond version ${{ steps.version.outputs.tag }}"
-            PR_BODY="Updates the Homebrew formula for xiond to version ${{ steps.version.outputs.tag }}"
+            PR_TITLE="Brew formula update for xiond version ${TAG}"
+            PR_BODY="Updates the Homebrew formula for xiond to version ${TAG}"
           fi
 
           # Check if PR already exists
